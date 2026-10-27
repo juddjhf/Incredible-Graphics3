@@ -10,10 +10,21 @@ import {
   Star,
   LoaderCircle,
   ArrowLeft,
+  ExternalLink,
 } from "lucide-react";
 
 import api from "../services/api";
 import FileUpload from "../components/FileUpload";
+
+const CATEGORIES = [
+  "Logo Design",
+  "Branding",
+  "Social Media Design",
+  "YouTube Thumbnail",
+  "Poster Design",
+  "UI/UX Design",
+  "Other",
+];
 
 const initialForm = {
   title: "",
@@ -31,15 +42,20 @@ const initialForm = {
 
 function AdminProjects() {
   const [projects, setProjects] = useState([]);
-  const [formData, setFormData] = useState(initialForm);
+  const [formData, setFormData] = useState({
+    ...initialForm,
+    image: { ...initialForm.image },
+  });
+
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Fetch all projects
+  // Load projects from backend
   const fetchProjects = async () => {
     try {
       setLoading(true);
@@ -48,15 +64,17 @@ function AdminProjects() {
       const response = await api.get("/projects");
       const data = response.data;
 
-      setProjects(
-        Array.isArray(data)
-          ? data
-          : data.projects || data.data || []
-      );
+      const projectList = Array.isArray(data)
+        ? data
+        : data?.projects || data?.data || [];
+
+      setProjects(projectList);
     } catch (err) {
+      console.error("Fetch projects error:", err);
+
       setError(
         err.response?.data?.message ||
-          "Projects load nahi ho paaye."
+          "Projects load nahi ho paaye. Backend API check karo."
       );
     } finally {
       setLoading(false);
@@ -67,7 +85,7 @@ function AdminProjects() {
     fetchProjects();
   }, []);
 
-  // Update form fields
+  // Handle input changes
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
 
@@ -77,16 +95,19 @@ function AdminProjects() {
     }));
   };
 
-  // Open form for a new project
+  // Open add form
   const handleAdd = () => {
     setEditingId(null);
-    setFormData({ ...initialForm, image: { ...initialForm.image } });
+    setFormData({
+      ...initialForm,
+      image: { ...initialForm.image },
+    });
     setError("");
     setSuccess("");
     setShowForm(true);
   };
 
-  // Open form for editing
+  // Open edit form
   const handleEdit = (project) => {
     setEditingId(project._id);
 
@@ -115,40 +136,68 @@ function AdminProjects() {
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
-    setFormData({ ...initialForm, image: { ...initialForm.image } });
+    setFormData({
+      ...initialForm,
+      image: { ...initialForm.image },
+    });
     setError("");
   };
 
-  // Save project
+  // Save new project or update existing project
   const handleSubmit = async (event) => {
     event.preventDefault();
+
     if (saving) return;
 
-    try {
-      setSaving(true);
-      setError("");
-      setSuccess("");
+    setSaving(true);
+    setError("");
+    setSuccess("");
 
-      if (!formData.image.url) {
-        setError("Pehle project ki image select karke upload karo.");
+    try {
+      if (!formData.image.url?.trim()) {
+        setError("Pehle project ki image upload karo.");
         return;
       }
 
       const payload = {
         ...formData,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        category: formData.category,
+        image: {
+          url: formData.image.url.trim(),
+          publicId: formData.image.publicId || "",
+        },
+        projectUrl: formData.projectUrl.trim(),
         tags: formData.tags
           .split(",")
           .map((tag) => tag.trim())
           .filter(Boolean),
       };
 
+      let response;
+
       if (editingId) {
-        await api.put(`/projects/${editingId}`, payload);
-        setSuccess("Project successfully update ho gaya.");
+        // Backend route uses PATCH, not PUT
+        response = await api.patch(
+          `/projects/${editingId}`,
+          payload
+        );
       } else {
-        await api.post("/projects", payload);
-        setSuccess("Project successfully add ho gaya.");
+        response = await api.post("/projects", payload);
       }
+
+      if (response.data?.success === false) {
+        throw new Error(
+          response.data.message || "Project save nahi hua."
+        );
+      }
+
+      setSuccess(
+        editingId
+          ? "Project successfully update ho gaya."
+          : "Project successfully add ho gaya."
+      );
 
       setShowForm(false);
       setEditingId(null);
@@ -159,9 +208,12 @@ function AdminProjects() {
 
       await fetchProjects();
     } catch (err) {
+      console.error("Save project error:", err);
+
       setError(
         err.response?.data?.message ||
-          "Project save nahi ho paaya. Backend routes check karo."
+          err.message ||
+          "Project save nahi ho paaya. Login aur backend API check karo."
       );
     } finally {
       setSaving(false);
@@ -177,6 +229,7 @@ function AdminProjects() {
     if (!confirmed) return;
 
     try {
+      setDeletingId(projectId);
       setError("");
       setSuccess("");
 
@@ -186,12 +239,16 @@ function AdminProjects() {
         previous.filter((project) => project._id !== projectId)
       );
 
-      setSuccess("Project delete ho gaya.");
+      setSuccess("Project successfully delete ho gaya.");
     } catch (err) {
+      console.error("Delete project error:", err);
+
       setError(
         err.response?.data?.message ||
           "Project delete nahi ho paaya."
       );
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -214,40 +271,53 @@ function AdminProjects() {
             </h1>
 
             <p className="mt-2 text-gray-400">
-              Portfolio projects add, edit aur delete karo.
+              Add, edit and manage graphic design projects.
             </p>
           </div>
 
           <button
             type="button"
             onClick={handleAdd}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 font-semibold hover:bg-violet-500"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 font-semibold transition hover:bg-violet-500"
           >
             <Plus size={18} />
             Add Project
           </button>
         </div>
 
-        {/* Notifications */}
+        {/* Error and success messages */}
         {error && (
-          <div className="mb-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">
-            {error}
+          <div
+            role="alert"
+            className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300"
+          >
+            <p>{error}</p>
+            <button
+              type="button"
+              onClick={() => setError("")}
+              aria-label="Dismiss error"
+            >
+              <X size={18} />
+            </button>
           </div>
         )}
 
         {success && (
-          <div className="mb-5 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-300">
+          <div
+            role="status"
+            className="mb-5 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-300"
+          >
             {success}
           </div>
         )}
 
-        {/* Add/Edit Form */}
+        {/* Add/Edit form */}
         {showForm && (
           <form
             onSubmit={handleSubmit}
             className="mb-8 space-y-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:p-7"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-bold">
                 {editingId ? "Edit Project" : "Add New Project"}
               </h2>
@@ -265,10 +335,15 @@ function AdminProjects() {
             <div className="grid gap-5 md:grid-cols-2">
               {/* Title */}
               <div>
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-title"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Project Title *
                 </label>
+
                 <input
+                  id="project-title"
                   name="title"
                   value={formData.title}
                   onChange={handleChange}
@@ -281,36 +356,56 @@ function AdminProjects() {
 
               {/* Category */}
               <div>
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-category"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Category *
                 </label>
-                <input
+
+                <select
+                  id="project-category"
                   name="category"
                   value={formData.category}
                   onChange={handleChange}
                   required
-                  placeholder="Branding, Social Media, Logo..."
-                  className="w-full rounded-xl border border-white/10 bg-[#15151c] px-4 py-3 outline-none focus:border-violet-500"
-                />
+                  className="w-full rounded-xl border border-white/10 bg-[#15151c] px-4 py-3 text-white outline-none focus:border-violet-500"
+                >
+                  <option value="" disabled>
+                    Select category
+                  </option>
+
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Description */}
               <div className="md:col-span-2">
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-description"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Description *
                 </label>
+
                 <textarea
+                  id="project-description"
                   name="description"
                   value={formData.description}
                   onChange={handleChange}
                   required
                   rows={4}
+                  maxLength={5000}
                   placeholder="Describe this graphic design project..."
                   className="w-full rounded-xl border border-white/10 bg-[#15151c] px-4 py-3 outline-none focus:border-violet-500"
                 />
               </div>
 
-              {/* Image Upload */}
+              {/* Image upload */}
               <div className="md:col-span-2">
                 <FileUpload
                   accept="image/*"
@@ -319,8 +414,12 @@ function AdminProjects() {
                   onUploaded={({ url, publicId }) => {
                     setFormData((previous) => ({
                       ...previous,
-                      image: { url, publicId },
+                      image: {
+                        url,
+                        publicId: publicId || "",
+                      },
                     }));
+
                     setError("");
                   }}
                 />
@@ -334,10 +433,15 @@ function AdminProjects() {
 
               {/* Project URL */}
               <div>
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-url"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Project / Live Website URL
                 </label>
+
                 <input
+                  id="project-url"
                   type="url"
                   name="projectUrl"
                   value={formData.projectUrl}
@@ -349,10 +453,15 @@ function AdminProjects() {
 
               {/* Tags */}
               <div>
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-tags"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Tags (comma separated)
                 </label>
+
                 <input
+                  id="project-tags"
                   name="tags"
                   value={formData.tags}
                   onChange={handleChange}
@@ -363,10 +472,15 @@ function AdminProjects() {
 
               {/* Status */}
               <div>
-                <label className="mb-2 block text-sm text-gray-300">
+                <label
+                  htmlFor="project-status"
+                  className="mb-2 block text-sm text-gray-300"
+                >
                   Status
                 </label>
+
                 <select
+                  id="project-status"
                   name="status"
                   value={formData.status}
                   onChange={handleChange}
@@ -386,19 +500,27 @@ function AdminProjects() {
                   onChange={handleChange}
                   className="h-4 w-4 accent-violet-500"
                 />
+
                 <span className="text-sm text-gray-300">
                   Feature this project on the homepage
                 </span>
               </label>
             </div>
 
+            {/* Form actions */}
             <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
                 disabled={saving}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 font-semibold hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 font-semibold transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {saving && <LoaderCircle size={18} className="animate-spin" />}
+                {saving && (
+                  <LoaderCircle
+                    size={18}
+                    className="animate-spin"
+                  />
+                )}
+
                 {saving
                   ? "Saving..."
                   : editingId
@@ -409,7 +531,8 @@ function AdminProjects() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="rounded-xl border border-white/10 px-6 py-3 text-gray-300 hover:bg-white/5"
+                disabled={saving}
+                className="rounded-xl border border-white/10 px-6 py-3 text-gray-300 hover:bg-white/5 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -417,7 +540,7 @@ function AdminProjects() {
           </form>
         )}
 
-        {/* Projects List */}
+        {/* Projects list */}
         {loading ? (
           <div className="flex items-center justify-center gap-3 py-20 text-gray-400">
             <LoaderCircle size={22} className="animate-spin" />
@@ -429,12 +552,25 @@ function AdminProjects() {
               size={42}
               className="mx-auto mb-4 text-gray-500"
             />
+
             <h3 className="text-xl font-semibold">
               No projects found
             </h3>
+
             <p className="mt-2 text-gray-400">
               Add your first graphic design project.
             </p>
+
+            {!showForm && (
+              <button
+                type="button"
+                onClick={handleAdd}
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 font-semibold hover:bg-violet-500"
+              >
+                <Plus size={18} />
+                Add First Project
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -447,7 +583,8 @@ function AdminProjects() {
                   {project.image?.url ? (
                     <img
                       src={project.image.url}
-                      alt={project.title}
+                      alt={project.title || "Project image"}
+                      loading="lazy"
                       className="h-full w-full object-cover"
                     />
                   ) : (
@@ -495,7 +632,7 @@ function AdminProjects() {
                       </div>
                     )}
 
-                  <div className="mt-5 flex gap-3 border-t border-white/10 pt-4">
+                  <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4">
                     <button
                       type="button"
                       onClick={() => handleEdit(project)}
@@ -505,12 +642,32 @@ function AdminProjects() {
                       Edit
                     </button>
 
+                    {project.projectUrl && (
+                      <a
+                        href={project.projectUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
+                      >
+                        <ExternalLink size={15} />
+                        View
+                      </a>
+                    )}
+
                     <button
                       type="button"
+                      disabled={deletingId === project._id}
                       onClick={() => handleDelete(project._id)}
-                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                     >
-                      <Trash2 size={15} />
+                      {deletingId === project._id ? (
+                        <LoaderCircle
+                          size={15}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <Trash2 size={15} />
+                      )}
                       Delete
                     </button>
                   </div>
