@@ -8,17 +8,22 @@ const loginAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validate input
-    if (!email || !password) {
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      !email.trim() ||
+      !password
+    ) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required",
       });
     }
 
-    // Find admin (password is excluded by default)
+    const normalizedEmail = email.trim().toLowerCase();
+
     const admin = await Admin.findOne({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
     }).select("+password");
 
     if (!admin) {
@@ -28,7 +33,13 @@ const loginAdmin = async (req, res) => {
       });
     }
 
-    // Compare hashed password
+    if (!admin.password) {
+      return res.status(500).json({
+        success: false,
+        message: "Admin password is not configured",
+      });
+    }
+
     const isMatch = await bcrypt.compare(
       password,
       admin.password
@@ -41,7 +52,22 @@ const loginAdmin = async (req, res) => {
       });
     }
 
-    // Generate JWT
+    if (admin.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Admin access denied",
+      });
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is missing");
+
+      return res.status(500).json({
+        success: false,
+        message: "Server authentication is not configured",
+      });
+    }
+
     const token = jwt.sign(
       {
         id: admin._id,
@@ -53,7 +79,6 @@ const loginAdmin = async (req, res) => {
       }
     );
 
-    // Send response
     return res.status(200).json({
       success: true,
       message: "Admin login successful",
